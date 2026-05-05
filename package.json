@@ -1,0 +1,23 @@
+{
+  "name": "tor-traffic-bot-cloud",
+  "version": "1.0.0",
+  "description": "Cloud-ready headless Tor traffic generator",
+  "main": "bot.js",
+  "scripts": {
+    "start": "ts-node bot.ts"
+  },
+  "dependencies": {
+    "p-limit": "^3.1.0",
+    "puppeteer": "^24.37.5",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-adblocker": "^2.13.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "user-agents": "^1.1.332"
+  },
+  "devDependencies": {
+    "@types/node": "^20.5.6",
+    "@types/user-agents": "^1.0.4",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.2.2"
+  }
+}
