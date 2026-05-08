@@ -10,38 +10,58 @@ puppeteer.use(StealthPlugin());
 // ════════════════════════════════════════════════════════
 //  CONFIGURATION  (override with environment variables)
 // ════════════════════════════════════════════════════════
-const LINKS_FILE       = process.env.LINKS_FILE        || 'links.txt';
-const TOR_PROXY        = process.env.TOR_PROXY         || 'socks5://127.0.0.1:9050';
+const LINKS_FILE = process.env.LINKS_FILE || 'links.txt';
+const TOR_PROXY = process.env.TOR_PROXY || 'socks5://127.0.0.1:9050';
 const TOR_CONTROL_PORT = parseInt(process.env.TOR_CONTROL_PORT || '9051');
-const CONCURRENT_AGENTS= parseInt(process.env.CONCURRENT_AGENTS || '5');
-const VISIT_DURATION_MS= parseInt(process.env.VISIT_DURATION_MS || '30000');
-const CHROME_PATH      = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
+const CONCURRENT_AGENTS = parseInt(process.env.CONCURRENT_AGENTS || '10');
+const VISIT_DURATION_MS = parseInt(process.env.VISIT_DURATION_MS || '30000');
+const CHROME_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
 
 // Safety: Pause for PAUSE_DURATION_MS after every PAUSE_EVERY_N links
-const PAUSE_EVERY_N    = parseInt(process.env.PAUSE_EVERY_N    || '50');
-const PAUSE_DURATION_MS= parseInt(process.env.PAUSE_DURATION_MS || '120000'); // 2 minutes
+const PAUSE_EVERY_N = parseInt(process.env.PAUSE_EVERY_N || '50');
+const PAUSE_DURATION_MS = parseInt(process.env.PAUSE_DURATION_MS || '120000'); // 2 minutes
 
 // ════════════════════════════════════════════════════════
 //  STATE
 // ════════════════════════════════════════════════════════
 let completedVisits = 0;
-let failedVisits    = 0;
-let totalLinks      = 0;
-let sessionStart    = Date.now();
+let failedVisits = 0;
+let totalLinks = 0;
+let sessionStart = Date.now();
+
+const LINK_FILES = [
+    'links_3eb8462740.txt',
+    'links_8bb22ea789.txt',
+    'links_41a24fa1af.txt',
+    'links_88c05dc32c.txt',
+    'links_275e6dccce.txt',
+    'links_1801b5f158.txt',
+    'links_5308a2fbf4.txt',
+    'links_4171792b7c.txt',
+    'links_6927b680d3.txt',
+    'links_a7cfca0cbf.txt',
+    'links_a7d02c1618.txt',
+    'links_b2c13b69d4.txt',
+    'links_b75016373b.txt',
+    'links_ba1a8dd79e.txt',
+    'links_deaddbf426.txt',
+    'links.txt'
+];
+let currentFileIndex = 0;
 
 // ════════════════════════════════════════════════════════
 //  LOGGING HELPERS
 // ════════════════════════════════════════════════════════
-const RESET  = '\x1b[0m';
-const BOLD   = '\x1b[1m';
-const DIM    = '\x1b[2m';
-const GREEN  = '\x1b[32m';
+const RESET = '\x1b[0m';
+const BOLD = '\x1b[1m';
+const DIM = '\x1b[2m';
+const GREEN = '\x1b[32m';
 const YELLOW = '\x1b[33m';
-const RED    = '\x1b[31m';
-const CYAN   = '\x1b[36m';
-const MAGENTA= '\x1b[35m';
-const BLUE   = '\x1b[34m';
-const WHITE  = '\x1b[37m';
+const RED = '\x1b[31m';
+const CYAN = '\x1b[36m';
+const MAGENTA = '\x1b[35m';
+const BLUE = '\x1b[34m';
+const WHITE = '\x1b[37m';
 
 function timestamp() {
     return `${DIM}${new Date().toLocaleTimeString()}${RESET}`;
@@ -92,7 +112,7 @@ function logPause(linksProcessed: number, durationSec: number) {
 
 function logStats() {
     const elapsed = ((Date.now() - sessionStart) / 60000).toFixed(1);
-    const rate    = (completedVisits / parseFloat(elapsed) || 0).toFixed(1);
+    const rate = (completedVisits / parseFloat(elapsed) || 0).toFixed(1);
     console.log(`${divider()}`);
     console.log(`  ${BOLD}${WHITE}📊  SESSION STATS${RESET}`);
     console.log(`  ${GREEN}✔ Successful: ${completedVisits}${RESET}  ${RED}✘ Failed: ${failedVisits}${RESET}  ${CYAN}⚡ Rate: ${rate}/min${RESET}  ${DIM}⏱ ${elapsed}m${RESET}`);
@@ -126,7 +146,7 @@ async function visitLink(url: string, agentId: number) {
         ua: userAgent.toString(),
         platform: userAgent.data.platform || 'Win32',
         viewport: {
-            width:  userAgent.data.viewportWidth  || 1366,
+            width: userAgent.data.viewportWidth || 1366,
             height: userAgent.data.viewportHeight || 768
         }
     };
@@ -209,7 +229,7 @@ async function visitLink(url: string, agentId: number) {
 // ════════════════════════════════════════════════════════
 async function main() {
     let cycleCount = 1;
-    sessionStart   = Date.now();
+    sessionStart = Date.now();
 
     console.log(`\n${divider('═')}`);
     console.log(`  ${MAGENTA}${BOLD}🤖  TOR TRAFFIC BOT  — STARTING UP${RESET}`);
@@ -217,22 +237,25 @@ async function main() {
     console.log(`${divider('═')}\n`);
 
     while (true) {
-        if (!fs.existsSync(LINKS_FILE)) {
-            console.log(`${RED}[ERROR] ${LINKS_FILE} not found! Retrying in 10s...${RESET}`);
-            await new Promise(r => setTimeout(r, 10000));
+        const currentFile = LINK_FILES[currentFileIndex];
+        if (!fs.existsSync(currentFile)) {
+            console.log(`${RED}[ERROR] ${currentFile} not found! Skipping to next in 5s...${RESET}`);
+            currentFileIndex = (currentFileIndex + 1) % LINK_FILES.length;
+            await new Promise(r => setTimeout(r, 5000));
             continue;
         }
 
-        const links = fs.readFileSync(LINKS_FILE, 'utf-8')
+        const links = fs.readFileSync(currentFile, 'utf-8')
             .split('\n')
             .map(l => l.trim())
             .filter(l => l.startsWith('http'));
 
-        totalLinks      = links.length;
+        totalLinks = links.length;
         completedVisits = 0;
-        failedVisits    = 0;
+        failedVisits = 0;
 
         logCycleHeader(cycleCount);
+        console.log(`  ${CYAN}📄 File: ${currentFile}${RESET}`);
 
         const limit = pLimit(CONCURRENT_AGENTS);
         let processedInBatch = 0;
@@ -240,7 +263,7 @@ async function main() {
         // Process links in batches of PAUSE_EVERY_N
         for (let i = 0; i < links.length; i += PAUSE_EVERY_N) {
             const batch = links.slice(i, i + PAUSE_EVERY_N);
-            const batchNum  = Math.floor(i / PAUSE_EVERY_N) + 1;
+            const batchNum = Math.floor(i / PAUSE_EVERY_N) + 1;
             const totalBatches = Math.ceil(links.length / PAUSE_EVERY_N);
 
             console.log(`\n  ${BOLD}${BLUE}📦 Batch ${batchNum}/${totalBatches}${RESET}  ${DIM}(links ${i + 1}–${Math.min(i + PAUSE_EVERY_N, links.length)})${RESET}`);
@@ -259,6 +282,12 @@ async function main() {
             await Promise.all(tasks);
             processedInBatch += batch.length;
 
+            // Check for rotation after 300 successes
+            if (completedVisits >= 300) {
+                console.log(`\n  ${YELLOW}${BOLD}🔄  Reached ${completedVisits} successes. Rotating to next file...${RESET}`);
+                break; // Break the batch loop
+            }
+
             // Pause between batches, but not after the last one
             if (i + PAUSE_EVERY_N < links.length) {
                 logPause(processedInBatch, PAUSE_DURATION_MS / 1000);
@@ -270,7 +299,10 @@ async function main() {
         logCycleFooter(cycleCount);
         logStats();
 
-        console.log(`${YELLOW}${BOLD}⟳  Restarting cycle in 30 seconds...${RESET}\n`);
+        // Move to next file
+        currentFileIndex = (currentFileIndex + 1) % LINK_FILES.length;
+
+        console.log(`${YELLOW}${BOLD}⟳  Moving to next file in 30 seconds...${RESET}\n`);
         await new Promise(r => setTimeout(r, 30000));
         cycleCount++;
     }
