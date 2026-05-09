@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as net from 'net';
 import pLimit from 'p-limit';
 import UserAgent from 'user-agents';
+import * as readline from 'readline';
 
 puppeteer.use(StealthPlugin());
 
@@ -13,7 +14,7 @@ puppeteer.use(StealthPlugin());
 const LINKS_FILE = process.env.LINKS_FILE || 'links.txt';
 const TOR_PROXY = process.env.TOR_PROXY || 'socks5://127.0.0.1:9050';
 const TOR_CONTROL_PORT = parseInt(process.env.TOR_CONTROL_PORT || '9051');
-const CONCURRENT_AGENTS = parseInt(process.env.CONCURRENT_AGENTS || '10');
+const CONCURRENT_AGENTS = parseInt(process.env.CONCURRENT_AGENTS || '5');
 const VISIT_DURATION_MS = parseInt(process.env.VISIT_DURATION_MS || '30000');
 const CHROME_PATH = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
 
@@ -29,7 +30,7 @@ let failedVisits = 0;
 let totalLinks = 0;
 let sessionStart = Date.now();
 
-const LINK_FILES = [
+const ORIGINAL_LINK_FILES = [
     'links_3eb8462740.txt',
     'links_8bb22ea789.txt',
     'links_41a24fa1af.txt',
@@ -47,7 +48,74 @@ const LINK_FILES = [
     'links_deaddbf426.txt',
     'links.txt'
 ];
-let currentFileIndex = 0;
+
+const ACCOUNT_MAPPING: Record<string, string> = {
+    'ba1a8dd79e': 'butler.ruby@proton.me',
+    'b2c13b69d4': 'thudenure@proton.me',
+    'deaddbf426': 'lewis_k7@proton.me',
+    '5308a2fbf4': 'danis8@proton.me',
+    '41a24fa1af': 'kirta3@proton.me',
+    '8bb22ea789': 'daribha1211@proton.me',
+    '4171792b7c': 'njncs@proton.me',
+    '275e6dccce': 'thelady34@proton.me',
+    '88c05dc32c': 'toasterwizard42@proton.me',
+    '3eb8462740': 'cactuslasagna@outlook.com',
+    '1801b5f158': 'mango_pickle99@proton.me',
+    'a7d02c1618': 'spaghettimirage@hotmail.com',
+    'b75016373b': 'rubberduckpilot@proton.me',
+    '6927b680d3': 'chairmanofbeans@outlook.com',
+    'a7cfca0cbf': 'galacticonion@proton.me'
+};
+
+interface FileState {
+    cursor: number;
+    successes: number;
+}
+
+const STATE_FILE = 'state.json';
+
+let state: Record<string, FileState> = {};
+if (fs.existsSync(STATE_FILE)) {
+    try {
+        state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'));
+    } catch (e) {
+        console.log(`\x1b[31m[ERROR] Failed to parse state file: ${e}\x1b[0m`);
+    }
+}
+
+function promptForFile(): Promise<string> {
+    return new Promise((resolve) => {
+        // Check for environment variable first
+        const envSelected = process.env.SELECTED_ACCOUNT;
+        if (envSelected && ORIGINAL_LINK_FILES.includes(envSelected)) {
+            console.log(`\x1b[32m[INFO] Using account from environment: ${envSelected}\x1b[0m`);
+            return resolve(envSelected);
+        }
+
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+
+        console.log('\nAvailable Accounts:');
+        ORIGINAL_LINK_FILES.forEach((file, index) => {
+            const hash = file.replace('links_', '').replace('.txt', '');
+            const email = ACCOUNT_MAPPING[hash] || 'Default/N/A';
+            console.log(`${index + 1}. ${file} (${email})`);
+        });
+
+        rl.question('\nSelect account number: ', (answer) => {
+            const index = parseInt(answer) - 1;
+            rl.close();
+            if (index >= 0 && index < ORIGINAL_LINK_FILES.length) {
+                resolve(ORIGINAL_LINK_FILES[index]);
+            } else {
+                console.log('Invalid selection. Using default links.txt');
+                resolve('links.txt');
+            }
+        });
+    });
+}
 
 // ════════════════════════════════════════════════════════
 //  LOGGING HELPERS
@@ -228,6 +296,29 @@ async function visitLink(url: string, agentId: number) {
 //  MAIN LOOP
 // ════════════════════════════════════════════════════════
 async function main() {
+    const selectedFile = await promptForFile();
+    console.log(`\x1b[32m[INFO] Selected file: ${selectedFile}\x1b[0m`);
+
+    // Load links for selected file
+    let links: string[] = [];
+    if (fs.existsSync(selectedFile)) {
+        links = fs.readFileSync(selectedFile, 'utf-8')
+            .split('\n')
+            .map(l => l.trim())
+            .filter(l => l.startsWith('http'));
+    } else {
+        console.log(`\x1b[31m[ERROR] File not found: ${selectedFile}\x1b[0m`);
+        return;
+    }
+
+    let cursor = state[selectedFile]?.cursor || 0;
+    let successes = state[selectedFile]?.successes || 0;
+
+    function saveCurrentState() {
+        state[selectedFile] = { cursor, successes };
+        fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+    }
+
     let cycleCount = 1;
     sessionStart = Date.now();
 
@@ -237,40 +328,42 @@ async function main() {
     console.log(`${divider('═')}\n`);
 
     while (true) {
-        const currentFile = LINK_FILES[currentFileIndex];
-        if (!fs.existsSync(currentFile)) {
-            console.log(`${RED}[ERROR] ${currentFile} not found! Skipping to next in 5s...${RESET}`);
-            currentFileIndex = (currentFileIndex + 1) % LINK_FILES.length;
-            await new Promise(r => setTimeout(r, 5000));
+        // Take at most 100 links
+        const chunkSize = 100;
+        const batch = links.slice(cursor, Math.min(cursor + chunkSize, links.length));
+
+        if (batch.length === 0) {
+            console.log(`\n${GREEN}${BOLD}🎉 Reached end of file. Resetting cursor and starting over...${RESET}\n`);
+            cursor = 0;
+            saveCurrentState();
+            cycleCount++;
             continue;
         }
 
-        const links = fs.readFileSync(currentFile, 'utf-8')
-            .split('\n')
-            .map(l => l.trim())
-            .filter(l => l.startsWith('http'));
-
-        totalLinks = links.length;
+        totalLinks = batch.length;
         completedVisits = 0;
         failedVisits = 0;
 
-        logCycleHeader(cycleCount);
-        console.log(`  ${CYAN}📄 File: ${currentFile}${RESET}`);
+        console.log(`\n${divider('═')}`);
+        console.log(`  ${MAGENTA}${BOLD}🔄  PROCESSING FILE: ${selectedFile}${RESET}`);
+        console.log(`  ${DIM}Processing links ${cursor + 1}–${cursor + batch.length} of ${links.length}${RESET}`);
+        console.log(`  ${DIM}Total Successes: ${successes}${RESET}`);
+        console.log(`  ${DIM}Cycle: #${cycleCount}${RESET}`);
+        console.log(`${divider('═')}\n`);
 
         const limit = pLimit(CONCURRENT_AGENTS);
-        let processedInBatch = 0;
 
-        // Process links in batches of PAUSE_EVERY_N
-        for (let i = 0; i < links.length; i += PAUSE_EVERY_N) {
-            const batch = links.slice(i, i + PAUSE_EVERY_N);
-            const batchNum = Math.floor(i / PAUSE_EVERY_N) + 1;
-            const totalBatches = Math.ceil(links.length / PAUSE_EVERY_N);
+        // Process the batch in sub-batches of PAUSE_EVERY_N
+        for (let j = 0; j < batch.length; j += PAUSE_EVERY_N) {
+            const subBatch = batch.slice(j, j + PAUSE_EVERY_N);
+            const batchNum = Math.floor(j / PAUSE_EVERY_N) + 1;
+            const totalBatches = Math.ceil(batch.length / PAUSE_EVERY_N);
 
-            console.log(`\n  ${BOLD}${BLUE}📦 Batch ${batchNum}/${totalBatches}${RESET}  ${DIM}(links ${i + 1}–${Math.min(i + PAUSE_EVERY_N, links.length)})${RESET}`);
+            console.log(`\n  ${BOLD}${BLUE}📦 Sub-Batch ${batchNum}/${totalBatches}${RESET}  ${DIM}(links ${cursor + j + 1}–${cursor + j + subBatch.length})${RESET}`);
             console.log(`  ${divider('─', 50)}`);
 
-            const tasks = batch.map((link, idx) => {
-                const globalIdx = i + idx;
+            const tasks = subBatch.map((link, idx) => {
+                const globalIdx = j + idx;
                 return limit(async () => {
                     await Promise.race([
                         visitLink(link, (globalIdx % CONCURRENT_AGENTS) + 1),
@@ -280,32 +373,32 @@ async function main() {
             });
 
             await Promise.all(tasks);
-            processedInBatch += batch.length;
 
-            // Check for rotation after 300 successes
-            if (completedVisits >= 300) {
-                console.log(`\n  ${YELLOW}${BOLD}🔄  Reached ${completedVisits} successes. Rotating to next file...${RESET}`);
-                break; // Break the batch loop
-            }
-
-            // Pause between batches, but not after the last one
-            if (i + PAUSE_EVERY_N < links.length) {
-                logPause(processedInBatch, PAUSE_DURATION_MS / 1000);
+            // Pause between sub-batches, but not after the last one in this file chunk
+            if (j + PAUSE_EVERY_N < batch.length) {
+                logPause(j + subBatch.length, PAUSE_DURATION_MS / 1000);
                 logStats();
                 await new Promise(r => setTimeout(r, PAUSE_DURATION_MS));
             }
         }
 
-        logCycleFooter(cycleCount);
+        // Update cursor and successes
+        cursor += batch.length;
+        successes += completedVisits;
+        saveCurrentState();
+
         logStats();
 
-        // Move to next file
-        currentFileIndex = (currentFileIndex + 1) % LINK_FILES.length;
+        // If we reached the end after this batch, reset cursor
+        if (cursor >= links.length) {
+            console.log(`\n${GREEN}${BOLD}🎉 Reached end of file. Resetting cursor...${RESET}\n`);
+            cursor = 0;
+            saveCurrentState();
+            cycleCount++;
+        }
 
-        console.log(`${YELLOW}${BOLD}⟳  Moving to next file in 30 seconds...${RESET}\n`);
-        await new Promise(r => setTimeout(r, 30000));
-        cycleCount++;
+        console.log(`${YELLOW}${BOLD}⟳  Continuing with next batch in this file...${RESET}\n`);
+        await new Promise(r => setTimeout(r, 5000));
     }
 }
-
 main().catch(console.error);
