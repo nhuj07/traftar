@@ -92,28 +92,10 @@ function promptForFile(): Promise<string> {
             return resolve(envSelected);
         }
 
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout
-        });
-
-        console.log('\nAvailable Accounts:');
-        ORIGINAL_LINK_FILES.forEach((file, index) => {
-            const hash = file.replace('links_', '').replace('.txt', '');
-            const email = ACCOUNT_MAPPING[hash] || 'Default/N/A';
-            console.log(`${index + 1}. ${file} (${email})`);
-        });
-
-        rl.question('\nSelect account number: ', (answer) => {
-            const index = parseInt(answer) - 1;
-            rl.close();
-            if (index >= 0 && index < ORIGINAL_LINK_FILES.length) {
-                resolve(ORIGINAL_LINK_FILES[index]);
-            } else {
-                console.log('Invalid selection. Using default links.txt');
-                resolve('links.txt');
-            }
-        });
+        const randomIndex = Math.floor(Math.random() * ORIGINAL_LINK_FILES.length);
+        const selectedFile = ORIGINAL_LINK_FILES[randomIndex];
+        console.log(`\x1b[32m[INFO] Randomly selected file: ${selectedFile}\x1b[0m`);
+        resolve(selectedFile);
     });
 }
 
