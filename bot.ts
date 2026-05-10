@@ -278,48 +278,53 @@ async function visitLink(url: string, agentId: number) {
 //  MAIN LOOP
 // ════════════════════════════════════════════════════════
 async function main() {
-    const selectedFile = await promptForFile();
-    console.log(`\x1b[32m[INFO] Selected file: ${selectedFile}\x1b[0m`);
+    // Load all links
+    const allLinks: Record<string, string[]> = {};
+    for (const file of ORIGINAL_LINK_FILES) {
+        if (fs.existsSync(file)) {
+            allLinks[file] = fs.readFileSync(file, 'utf-8')
+                .split('\n')
+                .map(l => l.trim())
+                .filter(l => l.startsWith('http'));
+            console.log(`\x1b[32m[INFO] Loaded ${allLinks[file].length} links from ${file}\x1b[0m`);
+        } else {
+            console.log(`\x1b[33m[WARN] File not found: ${file}\x1b[0m`);
+        }
+    }
 
-    // Load links for selected file
-    let links: string[] = [];
-    if (fs.existsSync(selectedFile)) {
-        links = fs.readFileSync(selectedFile, 'utf-8')
-            .split('\n')
-            .map(l => l.trim())
-            .filter(l => l.startsWith('http'));
-    } else {
-        console.log(`\x1b[31m[ERROR] File not found: ${selectedFile}\x1b[0m`);
+    const fileList = Object.keys(allLinks);
+    if (fileList.length === 0) {
+        console.log(`\x1b[31m[ERROR] No link files found!\x1b[0m`);
         return;
     }
 
-    let cursor = state[selectedFile]?.cursor || 0;
-    let successes = state[selectedFile]?.successes || 0;
-
-    function saveCurrentState() {
-        state[selectedFile] = { cursor, successes };
-        fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
-    }
-
-    let cycleCount = 1;
     sessionStart = Date.now();
 
     console.log(`\n${divider('═')}`);
-    console.log(`  ${MAGENTA}${BOLD}🤖  TOR TRAFFIC BOT  — STARTING UP${RESET}`);
+    console.log(`  ${MAGENTA}${BOLD}🤖  TOR TRAFFIC BOT  — STARTING UP (Interleaved Mode)${RESET}`);
     console.log(`  ${DIM}Agents: ${CONCURRENT_AGENTS}  │  Pause every: ${PAUSE_EVERY_N} links  │  Pause: ${PAUSE_DURATION_MS / 1000}s${RESET}`);
+    console.log(`  ${DIM}Files loaded: ${fileList.length}${RESET}`);
     console.log(`${divider('═')}\n`);
 
     while (true) {
+        // Pick a random file
+        const randomFileIndex = Math.floor(Math.random() * fileList.length);
+        const selectedFile = fileList[randomFileIndex];
+        const links = allLinks[selectedFile];
+
+        let cursor = state[selectedFile]?.cursor || 0;
+        let successes = state[selectedFile]?.successes || 0;
+
         // Take at most 100 links
         const chunkSize = 100;
         const batch = links.slice(cursor, Math.min(cursor + chunkSize, links.length));
 
         if (batch.length === 0) {
-            console.log(`\n${GREEN}${BOLD}🎉 Reached end of file. Resetting cursor and starting over...${RESET}\n`);
+            console.log(`\n${GREEN}${BOLD}🎉 Reached end of file ${selectedFile}. Resetting cursor...${RESET}\n`);
             cursor = 0;
-            saveCurrentState();
-            cycleCount++;
-            continue;
+            state[selectedFile] = { cursor, successes };
+            fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
+            continue; // Pick another file immediately
         }
 
         totalLinks = batch.length;
@@ -329,8 +334,7 @@ async function main() {
         console.log(`\n${divider('═')}`);
         console.log(`  ${MAGENTA}${BOLD}🔄  PROCESSING FILE: ${selectedFile}${RESET}`);
         console.log(`  ${DIM}Processing links ${cursor + 1}–${cursor + batch.length} of ${links.length}${RESET}`);
-        console.log(`  ${DIM}Total Successes: ${successes}${RESET}`);
-        console.log(`  ${DIM}Cycle: #${cycleCount}${RESET}`);
+        console.log(`  ${DIM}Total Successes for this file: ${successes}${RESET}`);
         console.log(`${divider('═')}\n`);
 
         const limit = pLimit(CONCURRENT_AGENTS);
@@ -367,19 +371,21 @@ async function main() {
         // Update cursor and successes
         cursor += batch.length;
         successes += completedVisits;
-        saveCurrentState();
+        
+        state[selectedFile] = { cursor, successes };
+        fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
 
         logStats();
 
-        // If we reached the end after this batch, reset cursor
+        // Check if we reached the end after this batch
         if (cursor >= links.length) {
-            console.log(`\n${GREEN}${BOLD}🎉 Reached end of file. Resetting cursor...${RESET}\n`);
+            console.log(`\n${GREEN}${BOLD}🎉 Reached end of file ${selectedFile}. Resetting cursor...${RESET}\n`);
             cursor = 0;
-            saveCurrentState();
-            cycleCount++;
+            state[selectedFile] = { cursor, successes };
+            fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
         }
 
-        console.log(`${YELLOW}${BOLD}⟳  Continuing with next batch in this file...${RESET}\n`);
+        console.log(`${YELLOW}${BOLD}⟳  Switching to next random file...${RESET}\n`);
         await new Promise(r => setTimeout(r, 5000));
     }
 }
