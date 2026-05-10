@@ -34,37 +34,21 @@ const ORIGINAL_LINK_FILES = [
     'links_3eb8462740.txt',
     'links_8bb22ea789.txt',
     'links_41a24fa1af.txt',
-    'links_88c05dc32c.txt',
     'links_275e6dccce.txt',
-    'links_1801b5f158.txt',
-    'links_5308a2fbf4.txt',
-    'links_4171792b7c.txt',
-    'links_6927b680d3.txt',
-    'links_a7cfca0cbf.txt',
     'links_a7d02c1618.txt',
-    'links_b2c13b69d4.txt',
     'links_b75016373b.txt',
     'links_ba1a8dd79e.txt',
-    'links_deaddbf426.txt',
     'links.txt'
 ];
 
 const ACCOUNT_MAPPING: Record<string, string> = {
     'ba1a8dd79e': 'butler.ruby@proton.me',
-    'b2c13b69d4': 'thudenure@proton.me',
-    'deaddbf426': 'lewis_k7@proton.me',
-    '5308a2fbf4': 'danis8@proton.me',
     '41a24fa1af': 'kirta3@proton.me',
     '8bb22ea789': 'daribha1211@proton.me',
-    '4171792b7c': 'njncs@proton.me',
     '275e6dccce': 'thelady34@proton.me',
-    '88c05dc32c': 'toasterwizard42@proton.me',
     '3eb8462740': 'cactuslasagna@outlook.com',
-    '1801b5f158': 'mango_pickle99@proton.me',
     'a7d02c1618': 'spaghettimirage@hotmail.com',
     'b75016373b': 'rubberduckpilot@proton.me',
-    '6927b680d3': 'chairmanofbeans@outlook.com',
-    'a7cfca0cbf': 'galacticonion@proton.me'
 };
 
 interface FileState {
@@ -371,7 +355,7 @@ async function main() {
         // Update cursor and successes
         cursor += batch.length;
         successes += completedVisits;
-        
+
         state[selectedFile] = { cursor, successes };
         fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
 
